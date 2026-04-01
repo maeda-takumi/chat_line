@@ -9,7 +9,7 @@ declare(strict_types=1);
  * - optional WEBHOOK_TOKEN for signature validation
  */
 
-require_once __DIR__ . '/config.php';
+require_once 'config.php';
 
 if (!defined('DB_HOST') || !defined('DB_NAME') || !defined('DB_USER') || !defined('DB_PASS') || !defined('DB_CHARSET')) {
     http_response_code(500);
