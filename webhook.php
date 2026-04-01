@@ -34,12 +34,19 @@ if ($rawBody === false || $rawBody === '') {
     exit;
 }
 
-$signature = $_SERVER['HTTP_X_CHATWORKWEBHOOKSIGNATURE'] ?? $_SERVER['X_CHATWORKWEBHOOKSIGNATURE'] ?? '';
+$signatureHeader = $_SERVER['HTTP_X_CHATWORKWEBHOOKSIGNATURE'] ?? $_SERVER['X_CHATWORKWEBHOOKSIGNATURE'] ?? '';
+$signatureQuery = $_GET['chatwork_webhook_signature'] ?? '';
+$signature = $signatureHeader !== '' ? $signatureHeader : (is_string($signatureQuery) ? urldecode($signatureQuery) : '');
 if (defined('WEBHOOK_TOKEN') && WEBHOOK_TOKEN !== '') {
     $expected = base64_encode(hash_hmac('sha256', $rawBody, WEBHOOK_TOKEN, true));
     if ($signature === '' || !hash_equals($expected, $signature)) {
         logWebhook($requestId, 'Invalid signature.', [
-            'signature_header_present' => $signature !== '',
+            'signature_header_present' => $signatureHeader !== '',
+            'signature_query_present' => is_string($signatureQuery) && $signatureQuery !== '',
+            'signature_used' => $signatureHeader !== '' ? 'header' : ((is_string($signatureQuery) && $signatureQuery !== '') ? 'query' : 'none'),
+            'signature_header_preview' => previewSecret($signatureHeader),
+            'signature_query_preview' => previewSecret(is_string($signatureQuery) ? urldecode($signatureQuery) : ''),
+            'expected_signature_preview' => previewSecret($expected),
         ]);
         http_response_code(403);
         echo 'Invalid signature.';
@@ -169,10 +176,11 @@ SQL;
     if (isset($pdo) && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
-    logWebhook($requestId, 'Webhook processed successfully.', [
+    logWebhook($requestId, 'Failed to process webhook.', [
         'event_type' => $eventType,
         'room_id' => $roomId,
         'message_id' => $messageId,
+        'error' => $e->getMessage(),
     ]);
     http_response_code(500);
     echo 'Failed to process webhook.';
@@ -263,4 +271,21 @@ function logWebhook(string $requestId, string $message, array $context = []): vo
     }
 
     error_log($line);
+}
+
+/**
+ * Return non-sensitive preview of a secret value for debugging.
+ */
+function previewSecret(string $value): string
+{
+    if ($value === '') {
+        return '';
+    }
+
+    $length = strlen($value);
+    if ($length <= 8) {
+        return str_repeat('*', $length);
+    }
+
+    return substr($value, 0, 4) . '...' . substr($value, -4);
 }
