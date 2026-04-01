@@ -91,11 +91,27 @@ $senderMentionId = null;
 $senderName = null;
 
 if (isset($event['account']) && is_array($event['account'])) {
-    $senderMentionId = isset($event['account']['account_id']) ? (string)$event['account']['account_id'] : null;
-    $senderName = isset($event['account']['name']) ? (string)$event['account']['name'] : null;
+    $senderMentionId = firstNonEmptyString([
+        $event['account']['account_id'] ?? null,
+        $event['account']['id'] ?? null,
+    ]);
+    $senderName = firstNonEmptyString([
+        $event['account']['name'] ?? null,
+        $event['account']['account_name'] ?? null,
+        $event['account']['display_name'] ?? null,
+    ]);
 } else {
-    $senderMentionId = isset($event['account_id']) ? (string)$event['account_id'] : null;
-    $senderName = isset($event['name']) ? (string)$event['name'] : null;
+    $senderMentionId = firstNonEmptyString([
+        $event['account_id'] ?? null,
+        $event['from_account_id'] ?? null,
+        $event['sender_id'] ?? null,
+    ]);
+    $senderName = firstNonEmptyString([
+        $event['name'] ?? null,
+        $event['account_name'] ?? null,
+        $event['from_account_name'] ?? null,
+        $event['sender_name'] ?? null,
+    ]);
 }
 
 $recipientTargets = extractRecipientTargets($body);
@@ -107,6 +123,15 @@ logWebhook($requestId, 'Webhook payload parsed.', [
     'message_id' => $messageId,
     'sender_mention_id' => $senderMentionId,
     'recipient_count' => count($recipientTargets),
+    'sender_name' => $senderName,
+    'sender_name_candidates' => [
+        'name' => $event['name'] ?? null,
+        'account_name' => $event['account_name'] ?? null,
+        'from_account_name' => $event['from_account_name'] ?? null,
+        'sender_name' => $event['sender_name'] ?? null,
+        'account.name' => (is_array($event['account'] ?? null) ? ($event['account']['name'] ?? null) : null),
+        'account.account_name' => (is_array($event['account'] ?? null) ? ($event['account']['account_name'] ?? null) : null),
+    ],
 ]);
 try {
     $dsn = sprintf('mysql:host=%s;dbname=%s;charset=%s', DB_HOST, DB_NAME, DB_CHARSET);
@@ -254,6 +279,25 @@ SQL;
     return (int)$row['id'];
 }
 
+/**
+ * Return first non-empty scalar value as string; otherwise null.
+ */
+function firstNonEmptyString(array $candidates): ?string
+{
+    foreach ($candidates as $candidate) {
+        if ($candidate === null) {
+            continue;
+        }
+        if (is_scalar($candidate)) {
+            $value = trim((string)$candidate);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+    }
+
+    return null;
+}
 /**
  * Write webhook execution log either to configured file (WEBHOOK_LOG_FILE) or PHP error log.
  */
