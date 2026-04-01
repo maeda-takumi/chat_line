@@ -38,15 +38,24 @@ $signatureHeader = $_SERVER['HTTP_X_CHATWORKWEBHOOKSIGNATURE'] ?? $_SERVER['X_CH
 $signatureQuery = $_GET['chatwork_webhook_signature'] ?? '';
 $signature = $signatureHeader !== '' ? $signatureHeader : (is_string($signatureQuery) ? urldecode($signatureQuery) : '');
 if (defined('WEBHOOK_TOKEN') && WEBHOOK_TOKEN !== '') {
-    $expected = base64_encode(hash_hmac('sha256', $rawBody, WEBHOOK_TOKEN, true));
-    if ($signature === '' || !hash_equals($expected, $signature)) {
+    $expectedSignatures = buildExpectedSignatures($rawBody, WEBHOOK_TOKEN);
+    $isValidSignature = false;
+    foreach ($expectedSignatures as $expectedSignature) {
+        if ($signature !== '' && hash_equals($expectedSignature, $signature)) {
+            $isValidSignature = true;
+            break;
+        }
+    }
+
+    if (!$isValidSignature) {
         logWebhook($requestId, 'Invalid signature.', [
             'signature_header_present' => $signatureHeader !== '',
             'signature_query_present' => is_string($signatureQuery) && $signatureQuery !== '',
             'signature_used' => $signatureHeader !== '' ? 'header' : ((is_string($signatureQuery) && $signatureQuery !== '') ? 'query' : 'none'),
             'signature_header_preview' => previewSecret($signatureHeader),
             'signature_query_preview' => previewSecret(is_string($signatureQuery) ? urldecode($signatureQuery) : ''),
-            'expected_signature_preview' => previewSecret($expected),
+            'expected_signature_preview' => previewSecret($expectedSignatures[0] ?? ''),
+            'expected_signature_count' => count($expectedSignatures),
         ]);
         http_response_code(403);
         echo 'Invalid signature.';
@@ -288,4 +297,28 @@ function previewSecret(string $value): string
     }
 
     return substr($value, 0, 4) . '...' . substr($value, -4);
+}
+/**
+ * Build accepted signature list from webhook token.
+ *
+ * Supports both plain text tokens and base64-encoded tokens. Some providers expose
+ * the token as base64 text even though signature computation requires the raw bytes.
+ */
+function buildExpectedSignatures(string $rawBody, string $token): array
+{
+    $keys = [$token];
+    $decodedToken = base64_decode($token, true);
+    if ($decodedToken !== false && base64_encode($decodedToken) === $token) {
+        $keys[] = $decodedToken;
+    }
+
+    $signatures = [];
+    foreach ($keys as $key) {
+        $signature = base64_encode(hash_hmac('sha256', $rawBody, $key, true));
+        if (!in_array($signature, $signatures, true)) {
+            $signatures[] = $signature;
+        }
+    }
+
+    return $signatures;
 }
