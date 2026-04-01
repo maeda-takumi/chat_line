@@ -100,17 +100,48 @@ if (isset($event['account']) && is_array($event['account'])) {
         $event['account']['account_name'] ?? null,
         $event['account']['display_name'] ?? null,
     ]);
-} else {
+}
+
+if ($senderMentionId === null && isset($event['from_account']) && is_array($event['from_account'])) {
     $senderMentionId = firstNonEmptyString([
+        $event['from_account']['account_id'] ?? null,
+        $event['from_account']['id'] ?? null,
+    ]);
+}
+if ($senderName === null && isset($event['from_account']) && is_array($event['from_account'])) {
+    $senderName = firstNonEmptyString([
+        $event['from_account']['name'] ?? null,
+        $event['from_account']['account_name'] ?? null,
+        $event['from_account']['display_name'] ?? null,
+    ]);
+}
+
+if ($senderMentionId === null || $senderName === null) {
+    $fallbackMentionId = firstNonEmptyString([
         $event['account_id'] ?? null,
         $event['from_account_id'] ?? null,
         $event['sender_id'] ?? null,
     ]);
-    $senderName = firstNonEmptyString([
+    $fallbackName = firstNonEmptyString([
         $event['name'] ?? null,
         $event['account_name'] ?? null,
         $event['from_account_name'] ?? null,
         $event['sender_name'] ?? null,
+    ]);
+    if ($senderMentionId === null) {
+        $senderMentionId = $fallbackMentionId;
+    }
+    if ($senderName === null) {
+        $senderName = $fallbackName;
+    }
+}
+
+if ($senderName === null) {
+    $senderMentionId = firstNonEmptyString([$senderMentionId]);
+    $senderName = firstNonEmptyString([
+        $event['user_name'] ?? null,
+        $event['user']['name'] ?? null,
+        $event['sender']['name'] ?? null,
     ]);
 }
 
@@ -129,6 +160,9 @@ logWebhook($requestId, 'Webhook payload parsed.', [
         'account_name' => $event['account_name'] ?? null,
         'from_account_name' => $event['from_account_name'] ?? null,
         'sender_name' => $event['sender_name'] ?? null,
+        'user_name' => $event['user_name'] ?? null,
+        'from_account.name' => (is_array($event['from_account'] ?? null) ? ($event['from_account']['name'] ?? null) : null),
+        'from_account.account_name' => (is_array($event['from_account'] ?? null) ? ($event['from_account']['account_name'] ?? null) : null),
         'account.name' => (is_array($event['account'] ?? null) ? ($event['account']['name'] ?? null) : null),
         'account.account_name' => (is_array($event['account'] ?? null) ? ($event['account']['account_name'] ?? null) : null),
     ],
