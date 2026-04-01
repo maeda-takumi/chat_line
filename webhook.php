@@ -11,7 +11,16 @@ declare(strict_types=1);
 
 require_once 'config.php';
 
+$requestId = bin2hex(random_bytes(8));
+logWebhook($requestId, 'Webhook request received.', [
+    'method' => $_SERVER['REQUEST_METHOD'] ?? null,
+    'uri' => $_SERVER['REQUEST_URI'] ?? null,
+    'remote_addr' => $_SERVER['REMOTE_ADDR'] ?? null,
+    'content_length' => $_SERVER['CONTENT_LENGTH'] ?? null,
+]);
+
 if (!defined('DB_HOST') || !defined('DB_NAME') || !defined('DB_USER') || !defined('DB_PASS') || !defined('DB_CHARSET')) {
+    logWebhook($requestId, 'Database configuration constants are missing.');
     http_response_code(500);
     echo 'Database configuration constants are missing.';
     exit;
@@ -19,6 +28,7 @@ if (!defined('DB_HOST') || !defined('DB_NAME') || !defined('DB_USER') || !define
 
 $rawBody = file_get_contents('php://input');
 if ($rawBody === false || $rawBody === '') {
+    logWebhook($requestId, 'Empty request body.');
     http_response_code(400);
     echo 'Empty request body.';
     exit;
@@ -28,6 +38,9 @@ $signature = $_SERVER['HTTP_X_CHATWORKWEBHOOKSIGNATURE'] ?? $_SERVER['X_CHATWORK
 if (defined('WEBHOOK_TOKEN') && WEBHOOK_TOKEN !== '') {
     $expected = base64_encode(hash_hmac('sha256', $rawBody, WEBHOOK_TOKEN, true));
     if ($signature === '' || !hash_equals($expected, $signature)) {
+        logWebhook($requestId, 'Invalid signature.', [
+            'signature_header_present' => $signature !== '',
+        ]);
         http_response_code(403);
         echo 'Invalid signature.';
         exit;
@@ -36,6 +49,9 @@ if (defined('WEBHOOK_TOKEN') && WEBHOOK_TOKEN !== '') {
 
 $payload = json_decode($rawBody, true);
 if (!is_array($payload)) {
+    logWebhook($requestId, 'Invalid JSON payload.', [
+        'json_error' => json_last_error_msg(),
+    ]);
     http_response_code(400);
     echo 'Invalid JSON payload.';
     exit;
@@ -44,6 +60,7 @@ if (!is_array($payload)) {
 $eventType = (string)($payload['webhook_event_type'] ?? '');
 $event = $payload['webhook_event'] ?? [];
 if (!is_array($event)) {
+    logWebhook($requestId, 'Invalid webhook_event.');
     http_response_code(400);
     echo 'Invalid webhook_event.';
     exit;
@@ -68,6 +85,13 @@ if (isset($event['account']) && is_array($event['account'])) {
 $recipientTargets = extractRecipientTargets($body);
 $recipientCsv = implode(',', $recipientTargets);
 
+logWebhook($requestId, 'Webhook payload parsed.', [
+    'event_type' => $eventType,
+    'room_id' => $roomId,
+    'message_id' => $messageId,
+    'sender_mention_id' => $senderMentionId,
+    'recipient_count' => count($recipientTargets),
+]);
 try {
     $dsn = sprintf('mysql:host=%s;dbname=%s;charset=%s', DB_HOST, DB_NAME, DB_CHARSET);
     $pdo = new PDO($dsn, DB_USER, DB_PASS, [
@@ -145,6 +169,11 @@ SQL;
     if (isset($pdo) && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
+    logWebhook($requestId, 'Webhook processed successfully.', [
+        'event_type' => $eventType,
+        'room_id' => $roomId,
+        'message_id' => $messageId,
+    ]);
     http_response_code(500);
     echo 'Failed to process webhook.';
     error_log('[chatwork-webhook] ' . $e->getMessage());
@@ -206,4 +235,32 @@ SQL;
     }
 
     return (int)$row['id'];
+}
+
+/**
+ * Write webhook execution log either to configured file (WEBHOOK_LOG_FILE) or PHP error log.
+ */
+function logWebhook(string $requestId, string $message, array $context = []): void
+{
+    $payload = [
+        'timestamp' => gmdate('c'),
+        'request_id' => $requestId,
+        'message' => $message,
+    ];
+
+    if ($context !== []) {
+        $payload['context'] = $context;
+    }
+
+    $line = '[chatwork-webhook] ' . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($line === false) {
+        $line = '[chatwork-webhook] {"timestamp":"' . gmdate('c') . '","request_id":"' . $requestId . '","message":"Failed to encode log payload."}';
+    }
+
+    if (defined('WEBHOOK_LOG_FILE') && WEBHOOK_LOG_FILE !== '') {
+        error_log($line . PHP_EOL, 3, WEBHOOK_LOG_FILE);
+        return;
+    }
+
+    error_log($line);
 }

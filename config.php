@@ -5,4 +5,5 @@
     define('DB_PASS', 'sedorisedori');
     define('DB_CHARSET', 'utf8mb4');
     define('WEBHOOK_TOKEN', 'jTnsJuRSuWj2v+6qOdTh4wA68N0SQ8W1MfaSachLgIY=');
+    define('WEBHOOK_LOG_FILE', 'webhook.log');
 ?>
